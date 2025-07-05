@@ -1,33 +1,52 @@
 #!/usr/bin/env bash
 set -e
 
-echo "📦 开始安装 Webmin..."
+# -------- CONFIG --------
+CREATE_USER=false       # 是否自动创建管理员账号
+ADMIN_USER="webadmin"
+ADMIN_PASS="webmin123"
+CUSTOM_PORT=10000       # 修改为非 10000 端口可更安全
+# ------------------------
 
-# 1. 安装基础依赖
-sudo apt update
-sudo apt install -y wget curl gnupg2 software-properties-common apt-transport-https perl
+echo "📦 正在安装 Webmin..."
 
-# 2. 添加 Webmin GPG 密钥
-wget -qO- http://www.webmin.com/jcameron-key.asc | sudo apt-key add -
+# 安装基础依赖
+apt update
+apt install -y wget curl gnupg2 software-properties-common apt-transport-https perl
 
-# 3. 添加 Webmin 软件源
-sudo tee /etc/apt/sources.list.d/webmin.list >/dev/null <<'EOF'
-deb http://download.webmin.com/download/repository sarge contrib
-EOF
+# 添加 GPG 密钥 & 源
+wget -qO- http://www.webmin.com/jcameron-key.asc | apt-key add -
+echo "deb http://download.webmin.com/download/repository sarge contrib" > /etc/apt/sources.list.d/webmin.list
 
-# 4. 安装 Webmin
-sudo apt update
-sudo apt install -y webmin
+# 安装 Webmin
+apt update
+apt install -y webmin
 
-# 5. 若 UFW 已启用，放行端口
-if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then
-  echo "🔓 检测到 UFW，自动放行 10000 端口..."
-  sudo ufw allow 10000/tcp
+# 开放 UFW 端口（如果启用）
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  echo "🔓 UFW 正在运行，放行端口 $CUSTOM_PORT..."
+  ufw allow ${CUSTOM_PORT}/tcp
 fi
 
-# 6. 输出访问信息
+# 修改端口（如果不是默认端口）
+if [[ "$CUSTOM_PORT" != "10000" ]]; then
+  sed -i "s/port=10000/port=${CUSTOM_PORT}/" /etc/webmin/miniserv.conf
+  systemctl restart webmin
+  echo "⚙️ Webmin 已更改监听端口为 ${CUSTOM_PORT}"
+fi
+
+# 自动创建管理员账号（可选）
+if [ "$CREATE_USER" = true ]; then
+  echo "👤 正在创建 Webmin 用户：$ADMIN_USER"
+  useradd -m -s /bin/bash $ADMIN_USER || true
+  echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
+  usermod -aG sudo $ADMIN_USER
+  echo "✅ 用户 $ADMIN_USER 创建成功，密码：$ADMIN_PASS"
+fi
+
+# 输出结果
 IP=$(hostname -I | awk '{print $1}')
 echo -e "\n✅ Webmin 安装完成！"
-echo -e "🌐 请在浏览器中访问：\e[1;32mhttps://$IP:10000\e[0m"
-echo "🔐 登录账号：系统用户名（如 root），密码为对应用户密码。"
-echo "⚠️ 如果浏览器提示证书不安全，点击“继续访问”即可。"
+echo -e "🌐 请在浏览器访问：\e[1;32mhttps://$IP:$CUSTOM_PORT\e[0m"
+echo -e "🔐 使用你的 Linux 系统用户名（如 root）登录"
+echo "⚠️ 证书为自签名，请点击浏览器的“继续访问”"
