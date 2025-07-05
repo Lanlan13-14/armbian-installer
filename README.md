@@ -50,3 +50,15 @@
 
 ### DONATE&支持本项目⬆️
 [助力按钮](https://wkdaily.cpolar.top/01)
+
+
+UFW-EASY
+一键命令
+```
+sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/Lanlan13-14/armbian-installer/master/ufw-easy.sh && chmod +x /usr/local/bin/ufw-easy && ufw-easy'
+```
+第二次使用输入
+```
+sudo ufw-easy
+```
+执行
