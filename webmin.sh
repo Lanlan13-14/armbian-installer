@@ -5,7 +5,6 @@ set -euo pipefail
 WEBUI_PORT=5000                         # ufw-webui 仅本地监听
 DNS_CRED_FILE="/root/.secrets/dns.ini"
 CONF_FILE="/etc/ufeasy.conf"            # 持久化配置
-DNS_PLUGIN=""                           # 动态决定
 # =====================================
 
 check_root() {
@@ -25,48 +24,18 @@ prompt_user() {
   SLUG=$(gen_slug)
   echo -e "✅ 已生成随机路径：\e[32m/${SLUG}/\e[0m"
 
-  echo "5️⃣ 选择 DNS 解析商:"
-  echo "   1) Cloudflare"
-  echo "   2) Aliyun"
-  echo "   3) Tencent DNSPod"
-  read -rp "输入序号: " dns_choice
-  case "$dns_choice" in
-    1) DNS_PLUGIN="dns-cloudflare"; prompt_cf ;;
-    2) DNS_PLUGIN="dns-aliyun";      prompt_aliyun ;;
-    3) DNS_PLUGIN="dns-dnspod";      prompt_dnspod ;;
-    *) echo "❌ 无效选择"; exit 1 ;;
-  esac
-}
-
-prompt_cf() {
+  echo "5️⃣ 配置 Cloudflare DNS 验证"
   read -rsp "🔑 Cloudflare API Token: " token; echo
   mkdir -p "$(dirname "$DNS_CRED_FILE")"
   echo "dns_cloudflare_api_token = $token" >"$DNS_CRED_FILE"
-}
-prompt_aliyun() {
-  read -rp  "🔑 Aliyun AccessKey ID: " id
-  read -rsp "🔐 Aliyun AccessKey Secret: " sec; echo
-  mkdir -p "$(dirname "$DNS_CRED_FILE")"
-  {
-    echo "dns_aliyun_access_key_id = $id"
-    echo "dns_aliyun_access_key_secret = $sec"
-  } >"$DNS_CRED_FILE"
-}
-prompt_dnspod() {
-  read -rp  "🔑 DNSPod ID: " id
-  read -rsp "🔐 DNSPod Token: " token; echo
-  mkdir -p "$(dirname "$DNS_CRED_FILE")"
-  {
-    echo "dns_dnspod_api_id = $id"
-    echo "dns_dnspod_api_token = $token"
-  } >"$DNS_CRED_FILE"
+  chmod 600 "$DNS_CRED_FILE"
 }
 
 # ---------- 系统安装 ----------
 install_pkg() {
   apt update
   apt install -y git python3 python3-pip nginx ufw certbot \
-                 python3-certbot-${DNS_PLUGIN} apache2-utils
+                 python3-certbot-dns-cloudflare apache2-utils
 }
 
 deploy_ufw_webui() {
@@ -88,19 +57,24 @@ EOF
 }
 
 issue_cert() {
-  chmod 600 "$DNS_CRED_FILE"
-  certbot certonly --${DNS_PLUGIN} \
-    --${DNS_PLUGIN}-credentials "$DNS_CRED_FILE" \
-    --${DNS_PLUGIN}-propagation-seconds 60 \
+  # 修复证书申请命令
+  certbot certonly --dns-cloudflare \
+    --dns-cloudflare-credentials "$DNS_CRED_FILE" \
+    --dns-cloudflare-propagation-seconds 60 \
     -d "$DOMAIN" --non-interactive --agree-tos --email "$EMAIL" \
     --cert-name ufw-webui
+  
+  # 创建证书续期钩子
   mkdir -p /etc/letsencrypt/renewal-hooks/post
   echo "systemctl reload nginx" >/etc/letsencrypt/renewal-hooks/post/reload-nginx.sh
   chmod +x /etc/letsencrypt/renewal-hooks/post/reload-nginx.sh
 }
 
 setup_nginx() {
+  # 创建基本认证文件
   htpasswd -bc /etc/nginx/.htpasswd root "$BASIC_PASS"
+  
+  # 创建Nginx配置
   cat >/etc/nginx/sites-available/ufw-webui <<EOF
 server {
     listen ${LISTEN_PORT} ssl http2;
@@ -122,13 +96,14 @@ server {
         auth_basic_user_file /etc/nginx/.htpasswd;
     }
 
-    # 其它路径一律跳转 example.com
+    # 其它路径一律跳转
     location / {
         return 302 https://example.com;
     }
 }
 EOF
   ln -sf /etc/nginx/sites-available/ufw-webui /etc/nginx/sites-enabled/
+  rm -f /etc/nginx/sites-enabled/default
   nginx -t
   systemctl reload nginx
 }
@@ -136,7 +111,7 @@ EOF
 setup_ufw() {
   ufw allow 22/tcp
   ufw allow ${LISTEN_PORT}/tcp
-  ufw deny  ${WEBUI_PORT}/tcp
+  ufw deny ${WEBUI_PORT}/tcp
   ufw --force enable
 }
 
