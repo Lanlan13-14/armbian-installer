@@ -34,20 +34,29 @@ prompt_user() {
 # ---------- 系统安装 ----------
 install_pkg() {
   apt update
+  # 安装必要的系统包
   apt install -y git python3 python3-pip nginx ufw certbot \
-                 python3-certbot-dns-cloudflare apache2-utils
+                 python3-certbot-dns-cloudflare apache2-utils python3-venv
 }
 
 deploy_ufw_webui() {
   git clone --depth=1 https://github.com/BryanHeBY/ufw-webui /opt/ufw-webui 2>/dev/null || true
-  pip3 install -q -r /opt/ufw-webui/requirements.txt
+  
+  # 修复：使用虚拟环境避免系统级包冲突
+  python3 -m venv /opt/ufw-webui/venv
+  source /opt/ufw-webui/venv/bin/activate
+  pip install -q -r /opt/ufw-webui/requirements.txt
+  deactivate
+  
+  # 创建服务文件
   cat >/etc/systemd/system/ufw-webui.service <<EOF
 [Unit]
 Description=UFW WebUI
 After=network.target
 [Service]
 WorkingDirectory=/opt/ufw-webui
-ExecStart=/usr/bin/python3 /opt/ufw-webui/app.py --host 127.0.0.1 --port ${WEBUI_PORT}
+Environment="PATH=/opt/ufw-webui/venv/bin:\$PATH"
+ExecStart=/opt/ufw-webui/venv/bin/python /opt/ufw-webui/app.py --host 127.0.0.1 --port ${WEBUI_PORT}
 Restart=always
 [Install]
 WantedBy=multi-user.target
